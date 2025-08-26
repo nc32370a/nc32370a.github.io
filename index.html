@@ -1176,6 +1176,13 @@ body {
     background: #fff;
     box-shadow: 0 2px 5px rgba(0,0,0,0.1);
     transition: background-color 0.2s;
+-webkit-tap-highlight-color: transparent;
+    outline: none;
+}
+.calculator-buttons button:active {
+    filter: brightness(0.9);
+}
+.calculator-buttons button:focus { outline: none; }
 }
 .calculator-buttons button:hover {
     background: #f0f0f0;
@@ -5257,6 +5264,15 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Erro geral ao carregar os dados:', error);
             showModal('Erro ao carregar os dados. Por favor, tente novamente mais tarde.');
         });
+});
+document.addEventListener('DOMContentLoaded', () => {
+    const pad = document.querySelector('.calculator-buttons');
+    if (pad) {
+        pad.addEventListener('click', e => {
+            const btn = e.target.closest('button');
+            if (btn) setTimeout(() => btn.blur(), 0);
+        });
+    }
 });
     </script>
 <script>
