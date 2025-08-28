@@ -163,6 +163,7 @@ body {
     padding: 20px;
 }
 #map {
+    position: relative;
     width: 100%;
     height: 350px;
     border-radius: 15px;
@@ -403,6 +404,7 @@ body {
 .nav-stop:hover {
     background: #d32f2f;
 }
+
 /* PATCH: estado normal do botão azul */
 #compassBtn {
     background-color: #0d47a1; /* ligado */
@@ -1317,7 +1319,13 @@ body {
     margin-bottom: 5px;
 }
 
-
+.nav-controls .nav-external {
+  background: #2e7d32;
+  color: white;
+}
+.nav-controls .nav-external:hover {
+  background: #1b5e20;
+}
 
 /* Centralizar textos */
 #horarios h3, #toDoList h3, #toDoList h4, #notes h3, #expenses h3, #expenses h4, #calculator h3, #timer h3, #converter h3, #lembretes h3, #horariosPdf h3, #horariosPdf h4 {
@@ -1554,7 +1562,7 @@ body {
   position: absolute;
   right: 16px;
   bottom: 16px;
-  z-index: 1001;
+  z-index: 1002;
 }
 #recenterBtn {
   width: 48px; height: 48px;
@@ -1996,7 +2004,13 @@ body {
                     <input type="text" id="search-input" placeholder="Pesquisar um local...">
                     <button id="search-button" onclick="searchMapLocation()"><i class="fas fa-search"></i></button>
                 </div>
-                <div id="map"></div>
+                <div id="map">
+<div class="map-fab">
+  <button id="recenterBtn" title="Recentra no meu local" onclick="recenterMap()">
+    <i class="fa-solid fa-location-crosshairs"></i>
+  </button>
+</div>
+</div>
 <!-- Overlay de navegação look-ahead -->
 <div id="navBanner" class="nav-banner" aria-live="polite">
   <div class="maneuver-icon"><i id="navBannerIcon" class="fa-solid fa-arrow-up"></i></div>
@@ -2019,11 +2033,6 @@ body {
     <span id="tp-left">—</span>
   </div>
 </div>
-<div class="map-fab">
-  <button id="recenterBtn" title="Recentra no meu local" onclick="recenterMap()">
-    <i class="fa-solid fa-location-crosshairs"></i>
-  </button>
-</div>
                 <div id="navigationPanel" class="navigation-panel">
                     <div class="nav-header">
                         <div class="nav-title">Navegação</div>
@@ -2040,6 +2049,9 @@ body {
                         <button class="nav-recalculate" onclick="recalculateRoute()">
                             <i class="fa-solid fa-route"></i> Recalcular
                         </button>
+<button class="nav-external" onclick="openGoogleMapsNav()">
+  <i class="fa-solid fa-up-right-from-square"></i> Google Maps
+</button>
                         <button class="nav-stop" onclick="stopNavigation()">
                             <i class="fa-solid fa-stop"></i> Parar
                         </button>
@@ -2354,10 +2366,10 @@ let lastGPS = null;
 let currentBearing = 0;
 let nextManeuverMarker = null; // "balão" de próxima manobra
 let lookAheadEnabled = true;
-
+let wakeLock = null;
+let currentTransportMode = 'driving';
 // util: converter graus->rad e vice-versa
 const toRad = d => d*Math.PI/180, toDeg = r => r*180/Math.PI;
-
 let userMarker = null;
 let searchMarker = null; // Marcador para o resultado da pesquisa
 let navigationActive = false;
@@ -2561,6 +2573,91 @@ async function getUserLocation() {
         updateUserLocation(viseuDefault);
         return viseuDefault;
     }
+}
+function setMapInteractions(enabled) {
+  if (!map) return;
+  if (enabled) {
+    map.dragging.enable();
+    map.touchZoom.enable();
+    map.doubleClickZoom.enable();
+    map.scrollWheelZoom.enable();
+    map.boxZoom.enable();
+    map.keyboard.enable();
+  } else {
+    map.dragging.disable();
+    map.touchZoom.disable();
+    map.doubleClickZoom.disable();
+    map.scrollWheelZoom.disable();
+    map.boxZoom.disable();
+    map.keyboard.disable();
+  }
+}
+
+function setLookAheadMode(on) {
+  lookAheadEnabled = !!on;
+  const btn = document.getElementById('compassBtn');
+  if (btn) {
+    btn.classList.toggle('off', !lookAheadEnabled);
+    btn.title = lookAheadEnabled ? 'Look‑Ahead ligado' : 'Look‑Ahead desligado';
+  }
+  setMapInteractions(!lookAheadEnabled);
+}
+function openGoogleMapsNav() {
+  if (!destinationLocation) {
+    showModal('Sem destino definido.');
+    return;
+  }
+  const name = destinationName || 'Destino';
+  openExternalNavigation(destinationLocation.lat, destinationLocation.lng, name);
+}
+
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  } catch (e) {
+    console.warn('Wake Lock indisponível:', e.message);
+  }
+}
+
+async function releaseWakeLock() {
+  try {
+    if (wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch (e) {
+    console.warn('Falha ao libertar wake lock:', e.message);
+  }
+}
+
+// Re-adquirir wake lock se o separador voltar a ficar visível
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && navigationActive) {
+    requestWakeLock();
+  }
+});
+
+function enterNavFullscreen() {
+  document.body.classList.add('nav-fullscreen');
+  const nav = document.getElementById('navigationPanel');
+  if (nav) nav.classList.add('active');
+  const banner = document.getElementById('navBanner');
+  if (banner) banner.style.display = 'flex';
+  const prog = document.getElementById('tripProgress');
+  if (prog) prog.style.display = 'flex';
+}
+
+function exitNavFullscreen() {
+  document.body.classList.remove('nav-fullscreen');
+  const nav = document.getElementById('navigationPanel');
+  if (nav) nav.classList.remove('active');
+  const banner = document.getElementById('navBanner');
+  if (banner) banner.style.display = 'none';
+  const prog = document.getElementById('tripProgress');
+  if (prog) prog.style.display = 'none';
 }
 function computeBearing(a, b){
   if(!a || !b) return currentBearing||0;
@@ -2802,14 +2899,15 @@ async function calculateRoute(start, end, transportMode = 'driving'){
 
     currentRoute = data.routes[0];
 
-    // construir instruções ricas
+    // limpar polylines antigas
+    if(remainingPolyline){ map.removeLayer(remainingPolyline); remainingPolyline=null; }
+    if(traversedPolyline){ map.removeLayer(traversedPolyline); traversedPolyline=null; }
+
+    // instruções
     routeInstructions = [];
     const steps = currentRoute.legs?.[0]?.steps || [];
     steps.forEach(step=>{
       const duration = Math.max(1, Math.round(step.duration||0));
-      const dTxt = duration>=60 ? `${Math.round(duration/60)} min` : `${duration} s`;
-      // enriquecer texto com ref/destinos quando existirem
-      const name = step.name || '';
       const ref = step.ref ? ` (${step.ref})` : '';
       const dest = step.destinations ? ` em direção a <strong>${step.destinations}</strong>` : '';
       const rich = getInstructionText(step).replace('</strong>', `${ref}</strong>`) + dest;
@@ -2818,20 +2916,21 @@ async function calculateRoute(start, end, transportMode = 'driving'){
         raw: step,
         instruction: rich,
         distance: step.distance>1000 ? `${(step.distance/1000).toFixed(1)} km` : `${Math.round(step.distance)} m`,
-        duration: duration,
+        duration,
         icon: getInstructionIcon(step),
         location: step.maneuver.location
       });
     });
 
-    // polylines: restante (viva) e percorrida (cinza)
+    // polylines
     const coords = currentRoute.geometry.coordinates.map(c=>L.latLng(c[1], c[0]));
-    if(remainingPolyline){ map.removeLayer(remainingPolyline); remainingPolyline=null; }
-    if(traversedPolyline){ map.removeLayer(traversedPolyline); traversedPolyline=null; }
     remainingPolyline = L.polyline(coords, { color:'#2196F3', weight:6, opacity:0.9, className:'leaf-remaining' }).addTo(map);
     traversedPolyline = L.polyline([coords[0]], { color:'#90A4AE', weight:6, opacity:0.5, className:'leaf-traversed' }).addTo(map);
 
-    // fit bounds
+    // Usa remainingPolyline como “routeControl” para off-route
+    routeControl = remainingPolyline;
+
+    // frame
     map.fitBounds(remainingPolyline.getBounds(), { padding:[50,50] });
 
     // UI
@@ -2840,13 +2939,12 @@ async function calculateRoute(start, end, transportMode = 'driving'){
     currentInstructionIndex = 0;
     updateNavigationPanel();
 
-    // banner + balão + progresso
     const first = steps[0];
     updateNavBanner(first, first?.distance||0, first?.duration||0);
     showNextManeuverCallout(first);
     updateTripProgress();
 
-    // look-ahead
+    // look-ahead pad
     document.getElementById('map').classList.add('map-lookahead-padding');
 
     speak(routeInstructions[0]?.instruction || 'Iniciar navegação');
@@ -2855,6 +2953,7 @@ async function calculateRoute(start, end, transportMode = 'driving'){
     throw err;
   }
 }
+
 function showTransportModeSelection(destLat, destLng, destName) {
     destinationLocation = L.latLng(destLat, destLng);
     destinationName = destName;
@@ -2863,57 +2962,55 @@ function showTransportModeSelection(destLat, destLng, destName) {
 
 // ====== PASSOS DE NAVEGAÇÃO ======
 async function initiateNavigation(transportMode) {
-    closeModal('transportModeModal');
+  closeModal('transportModeModal');
+  currentTransportMode = transportMode || 'driving';
 
-    if (!map) {
-        initMap();
-        await new Promise(r => setTimeout(r, 500));
-    }
+  if (!map) {
+    initMap();
+    await new Promise(r => setTimeout(r, 500));
+  }
 
-    if (!userLocation) {
-        try {
-            showModal('A obter a sua localização...');
-            const locationArray = await getCurrentLocationPromise();
-            userLocation = L.latLng(locationArray[0], locationArray[1]);
-            updateUserLocation(userLocation);
-            closeModal();
-        } catch (error) {
-            closeModal();
-            showLocationOptions(destinationLocation.lat, destinationLocation.lng, destinationName);
-            return;
-        }
-    }
-
+  if (!userLocation) {
     try {
-        showModal('Calculando rota...');
-        await calculateRoute(userLocation, destinationLocation, transportMode);
-        closeModal();
-
-        // 📍 PASSO 1 — visão geral
-        if (remainingPolyline) {
-            map.fitBounds(remainingPolyline.getBounds(), { padding: [50, 50] });
-        }
-        document.getElementById('navigationPanel').classList.add('active');
-        showTab('mapa');
-        document.getElementById('mapa').scrollIntoView({ behavior: 'smooth' });
-
-        // 📍 PASSO 2 — look-ahead após 3s (ou evento do utilizador)
-        setTimeout(() => {
-            navigationActive = true;
-            document.getElementById('map').classList.add('map-lookahead-padding');
-            setViewWithOffset(userLocation, 17);
-            startGPSTracking();
-
-            document.getElementById('navBanner').style.display = 'flex';
-            document.getElementById('tripProgress').style.display = 'flex';
-        }, 3000);
-
+      showModal('A obter a sua localização...');
+      const locationArray = await getCurrentLocationPromise();
+      userLocation = L.latLng(locationArray[0], locationArray[1]);
+      updateUserLocation(userLocation);
+      closeModal();
     } catch (error) {
-        closeModal();
-        showModal('Erro ao calcular a rota. Verifique a sua ligação à internet e tente novamente.');
+      closeModal();
+      showLocationOptions(destinationLocation.lat, destinationLocation.lng, destinationName);
+      return;
     }
-}
+  }
 
+  try {
+    showModal('Calculando rota...');
+    await calculateRoute(userLocation, destinationLocation, currentTransportMode);
+    closeModal();
+
+    // visão geral
+    if (remainingPolyline) {
+      map.fitBounds(remainingPolyline.getBounds(), { padding: [50, 50] });
+    }
+
+    // entrar em navegação full screen
+    navigationActive = true;
+    enterNavFullscreen();
+
+    // ativar look-ahead e tracking
+    setTimeout(async () => {
+      document.getElementById('map').classList.add('map-lookahead-padding');
+      setLookAheadMode(true);
+      setViewWithOffset(userLocation, 17);
+      startGPSTracking();
+      await requestWakeLock();
+    }, 400);
+  } catch (error) {
+    closeModal();
+    showModal('Erro ao calcular a rota. Verifique a sua ligação à internet e tente novamente.');
+  }
+}
 
 
 function showLocationOptions(destLat, destLng, destName) {
@@ -3038,52 +3135,76 @@ function startGPSTracking() {
 }
 
 async function recalculateRoute() {
-    if (userLocation && destinationLocation) {
-        showModal('Recalculando a rota...');
-        try {
-            await calculateRoute(userLocation, destinationLocation);
-            if (map && userLocation) map.setView(userLocation, 17);
-            closeModal();
-            startGPSTracking();
-        } catch (error) {
-            closeModal();
-            showModal('Erro ao recalcular a rota. Verifique a sua ligação à internet.');
-        }
-    } else {
-        console.warn('Localização do utilizador ou destino desconhecidos. Não é possível recalcular a rota.');
+  if (userLocation && destinationLocation) {
+    showModal('Recalculando a rota...');
+    try {
+      await calculateRoute(userLocation, destinationLocation, currentTransportMode);
+      if (map && userLocation) setViewWithOffset(userLocation, Math.max(map.getZoom()||17, 17));
+      closeModal();
+      // mantém tracking e look-ahead ativos
+      startGPSTracking();
+      if (!lookAheadEnabled) setLookAheadMode(true);
+    } catch (error) {
+      closeModal();
+      showModal('Erro ao recalcular a rota. Verifique a sua ligação à internet.');
     }
+  } else {
+    console.warn('Localização do utilizador ou destino desconhecidos. Não é possível recalcular a rota.');
+  }
 }
 
-function stopNavigation() {
-    navigationActive = false;
-    document.getElementById('navigationPanel').classList.remove('active');
-    if (watchId) { navigator.geolocation.clearWatch(watchId); watchId = null; }
-    if (routeControl) { map.removeLayer(routeControl); routeControl = null; }
-    currentInstructionIndex = 0;
-    routeInstructions = [];
-    currentRoute = null;
-    synth.cancel(); 
-    console.log('Navegação parada');
-document.getElementById('map').classList.remove('map-lookahead-padding');
-document.getElementById('navBanner').style.display = 'none';
-document.getElementById('tripProgress').style.display = 'none';
-if(nextManeuverMarker){ map.removeLayer(nextManeuverMarker); nextManeuverMarker=null; }
-if(traversedPolyline){ map.removeLayer(traversedPolyline); traversedPolyline=null; }
-if(remainingPolyline){ map.removeLayer(remainingPolyline); remainingPolyline=null; }
+
+async function stopNavigation() {
+  navigationActive = false;
+
+  // parar tracking
+  if (watchId) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+
+  // limpar UI/overlays
+  document.getElementById('map').classList.remove('map-lookahead-padding');
+  exitNavFullscreen();
+
+  // reativar interações do mapa
+  setLookAheadMode(false);
+
+  // remover polylines/marker/banner
+  if(nextManeuverMarker){ map.removeLayer(nextManeuverMarker); nextManeuverMarker=null; }
+  if(traversedPolyline){ map.removeLayer(traversedPolyline); traversedPolyline=null; }
+  if(remainingPolyline){ map.removeLayer(remainingPolyline); remainingPolyline=null; }
+  if(routeControl){ routeControl = null; }
+
+  currentInstructionIndex = 0;
+  routeInstructions = [];
+  currentRoute = null;
+  synth.cancel();
+
+  // libertar wake lock
+  await releaseWakeLock();
+
+  console.log('Navegação parada');
 }
 
 function checkOffRoute() {
-    if (!userLocation || !routeControl) return;
+  if (!userLocation) return;
 
+  // Usa remainingPolyline como referência primária
+  const refLine = remainingPolyline || routeControl;
+  if (!refLine) return;
+
+  try {
     const userLatLng = userLocation;
-    const closestPoint = L.GeometryUtil.closest(map, routeControl, userLatLng);
+    const closestPoint = L.GeometryUtil.closest(map, refLine, userLatLng);
     const distance = userLatLng.distanceTo(closestPoint);
 
+    // limiar padrão 50m
     if (distance > 50) { 
-        console.log("Fora da rota! A recalcular...");
-        showModal("Desviou-se da rota. A recalcular...");
-        recalculateRoute();
+      console.log("Fora da rota! A recalcular...");
+      showModal("Desviou-se da rota. A recalcular...");
+      recalculateRoute();
     }
+  } catch(e) {
+    console.warn('checkOffRoute falhou:', e.message);
+  }
 }
 
 function updateRouteProgress(){
